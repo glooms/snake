@@ -1,0 +1,67 @@
+package main
+
+import (
+  "fmt"
+  "io/ioutil"
+  "os"
+  "runtime/debug"
+
+  "github.com/rivo/tview"
+  "github.com/gdamore/tcell"
+)
+
+var box *tview.Box
+var title string
+var c int
+
+func main() {
+  box = tview.NewBox().SetBorder(true)
+  box = box.SetInputCapture(capture)
+  box = box.SetDrawFunc(draw)
+  newTitle("Hello, Universe!")
+  run()
+}
+
+func run() {
+  if err := tview.NewApplication().SetRoot(box, true).Run(); err != nil {
+    exit(err)
+  }
+}
+
+func newTitle(s string) {
+  title = s
+  box = box.SetTitle(s)
+}
+
+func capture(event *tcell.EventKey) *tcell.EventKey {
+  switch r := event.Rune(); r {
+  default:
+    s := title[:c] + string(r) + title[c + 1:]
+    c++
+    c %= len(title)
+    newTitle(s)
+  }
+  return nil
+}
+
+func draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int) {
+  paint := func(x, y int) {
+    screen.SetContent(x, y, '\u2588', []rune{}, tcell.StyleDefault)
+  }
+  for i := 1; i < 10; i++ {
+    paint(x + i, y + 1)
+    paint(x + 1, y + i)
+  }
+  xn, yn, wn, hn = x, y, w, h
+  log(debug.Stack())
+  return
+}
+
+func exit(e error) {
+  fmt.Println(e)
+  os.Exit(1)
+}
+
+func log(b []byte) {
+  ioutil.WriteFile("gfx.log", b, 0644)
+}
