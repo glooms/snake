@@ -1,7 +1,7 @@
 package main
 
 import (
-//  "fmt"
+  "fmt"
   "time"
 
   "github.com/rivo/tview"
@@ -13,6 +13,7 @@ type Snake struct{
   box *tview.Box
 
   tick time.Duration
+  dstep time.Duration
   pauseChan chan bool
   clockChan chan bool
 
@@ -27,30 +28,27 @@ type Snake struct{
   w, h int
 
   score int
+  speed int
 
   snakeStyle tcell.Style
-  snakeFullStyle tcell.Style
   foodStyle tcell.Style
-  sfStyle tcell.Style
-  fsStyle tcell.Style
+  hurtStyle tcell.Style
+  textStyle tcell.Style
 }
 
 const (
-  bu = '\u2580'
-  bf = '\u2588'
-  bl = '\u2584'
+  block = '\u2588'
 )
 
 func NewSnake() *Snake {
   snk := &Snake{}
   //Setup styles
-  csnk := tcell.ColorTeal
-  cfod := tcell.ColorFuchsia
-  snk.snakeStyle = tcell.StyleDefault.Foreground(csnk)
-  snk.snakeFullStyle = snk.snakeStyle.Background(csnk)
-  snk.foodStyle = tcell.StyleDefault.Foreground(cfod)
-  snk.sfStyle = snk.snakeStyle.Background(cfod)
-  snk.fsStyle = snk.foodStyle.Background(csnk)
+  csnk := tcell.ColorForestGreen
+  cfod := tcell.ColorDarkViolet
+  chrt := tcell.ColorDarkGreen
+  snk.snakeStyle = tcell.StyleDefault.Background(csnk)
+  snk.foodStyle = tcell.StyleDefault.Background(cfod)
+  snk.hurtStyle = tcell.StyleDefault.Background(chrt)
 
   //Setup box
   b := tview.NewBox().SetBorder(true)
@@ -62,11 +60,12 @@ func NewSnake() *Snake {
   snk.app = tview.NewApplication().SetRoot(b, true)
 
   //Setup threading and channels
-  dur, err := time.ParseDuration("100ms")
+  dur, err := time.ParseDuration("10ms")
   if err != nil {
     exit(err)
   }
-  snk.tick = dur
+  snk.tick = dur * 10
+  snk.dstep = dur
   snk.pauseChan = make(chan bool, 10)
   snk.clockChan = make(chan bool, 10)
 
@@ -121,6 +120,9 @@ func (snk *Snake) reset() {
   snk.over = false
   snk.started = false
   snk.paused = false
+  snk.score = 0
+  snk.speed = 1
+  snk.tick = snk.dstep * 10
 }
 
 func (snk *Snake) capture(event *tcell.EventKey) *tcell.EventKey {
@@ -172,9 +174,9 @@ func (snk *Snake) updateThread() {
 
 func (snk *Snake) newGrid(w, h int) {
   snk.w, snk.h = w, h
-  snk.grid = make([][]byte, snk.w)
+  snk.grid = make([][]byte, snk.w / 2 + 1)
   for i := range snk.grid {
-    snk.grid[i] = make([]byte, snk.h * 2)
+    snk.grid[i] = make([]byte, snk.h)
   }
 }
 
@@ -182,22 +184,29 @@ func (snk *Snake) eat() {
   snk.m.grow()
   snk.food = newFood(snk.w, snk.h, snk.m.get())
   snk.score++
+  if snk.speed * 5 < snk.score && snk.speed < 9 {
+    snk.speed++
+    snk.tick -= snk.dstep
+  }
 }
 
 func (snk *Snake) draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int) {
-  if snk.over {
-    p("Score: ", snk.score)
-    return
-  }
   if snk.food == nil {
     snk.food = newFood(w, h, snk.m.get())
   }
-  paint := func(px, py int, r rune, st tcell.Style) {
-    screen.SetContent(px, py, r, []rune{}, st)
+  fill := func(px, py int, st tcell.Style) {
+    r, cmb, _, _ := screen.GetContent(px, py)
+    screen.SetContent(px, py, r, cmb, st)
+    r, cmb, _, _ = screen.GetContent(px + 1, py)
+    screen.SetContent(px + 1, py, r, cmb, st)
   }
-  m := point{w / 2, h}
+  m := point{w / 4, h / 2}
+  str := fmt.Sprintf("SCORE: %d\t SPEED: %d", snk.score, snk.speed)
+  for i, r := range str {
+    screen.SetContent(3 * w / 4 + i, 1, r, []rune{}, snk.textStyle)
+  }
   head := snk.m.head()
-  if head.x + m.x == m.x * 2 - 1 || head.x + m.x == 0 || head.y + m.y  == (m.y - 1) * 2 || head.y + m.y == 1 {
+  if head.x + m.x == m.x * 2 || head.x + m.x == 0 || head.y + m.y == m.y * 2 || head.y + m.y == 0 {
     if snk.started {
       snk.gameOver()
     }
@@ -205,47 +214,83 @@ func (snk *Snake) draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int)
   snk.newGrid(w, h)
   for _, p := range snk.m.get() {
     x, y := p.x + m.x, p.y + m.y
-    snk.grid[x][y] = 1
+    print("snk: ", x, " ", y)
+    if snk.grid[x][y] == 1 {
+      snk.gameOver()
+    } else {
+      snk.grid[x][y] = 1
+    }
   }
-  snk.grid[snk.food.x + m.x][snk.food.y + m.y] = 2
+
+  if snk.food != nil {
+    x, y := snk.food.x + m.x, snk.food.y + m.y
+    print("food: ", x, " ", y)
+    if snk.grid[x][y] == 1 {
+      snk.eat()
+    } else {
+      snk.grid[x][y] = 2
+    }
+  }
+
+  if snk.over {
+    x, y := head.x + m.x, head.y + m.y
+    snk.grid[x][y] = 3
+  }
+
   for i, row := range snk.grid {
     for j, b := range row {
-      even := j & 1 == 0
       switch b {
       case 1:
-        switch {
-        case even && snk.grid[i][j + 1] == 1:
-          snk.grid[i][j + 1] = 0
-          paint(i, j / 2, bf, snk.snakeStyle)
-        case even:
-          if snk.grid[i][j + 1] == 2 {
-            snk.grid[i][j + 1] = 0
-            paint(i, j / 2, bu, snk.fsStyle)
-          } else {
-            paint(i, j / 2, bu, snk.snakeStyle)
-          }
-        default:
-          if snk.grid[i][j - 1] == 2 {
-            snk.grid[i][j - 1] = 0
-            paint(i, j / 2, bl, snk.sfStyle)
-          } else {
-            paint(i, j / 2, bl, snk.snakeStyle)
-          }
-        }
+        fill(i * 2, j, snk.snakeStyle)
       case 2:
-        switch {
-        case even:
-          paint(i, j / 2, bu, snk.foodStyle)
-        default:
-          paint(i, j / 2, bl, snk.foodStyle)
-        }
+        fill(i * 2, j, snk.foodStyle)
+      case 3:
+        fill(i * 2, j, snk.hurtStyle)
       }
     }
   }
-  if head == *snk.food {
-    snk.eat()
-  }
   screen.HideCursor()
+  if snk.over {
+    str := fmt.Sprintf("GAME OVER")
+    for i, r := range str {
+      screen.SetContent(w/2 - len(str) / 2 + i, h/2 - 1, r, []rune{}, snk.textStyle)
+    }
+    str = fmt.Sprintf("Press any key to try again")
+    for i, r := range str {
+      screen.SetContent(w/2 - len(str) / 2 + i, h/2 + 1, r, []rune{}, snk.textStyle)
+    }
+    str = fmt.Sprintf("SCORE: %d", snk.score)
+    for i, r := range str {
+      screen.SetContent(w/2 - len(str) / 2 + i, h/2 + 3, r, []rune{}, snk.textStyle)
+    }
+    var adj string
+    switch {
+    case snk.score < 5:
+      adj = "poor"
+    case snk.score < 10:
+      adj = "mediochre"
+    case snk.score < 20:
+      adj = "decent"
+    case snk.score < 30:
+      adj = "good"
+    case snk.score < 40:
+      adj = "respectable"
+    case snk.score < 50:
+      adj = "crazy"
+    case snk.score < 100:
+      adj = "INSANE"
+    case snk.score > 100:
+      adj = "GODLIKE"
+    }
+    if snk.score > 100 {
+      str = "You are: sNaKE_g0d"
+    } else {
+      str = fmt.Sprintf("It's %s.", adj)
+    }
+    for i, r := range str {
+      screen.SetContent(w/2 - len(str) / 2 + i, h/2 + 4, r, []rune{}, snk.textStyle)
+    }
+  }
   return
 }
 

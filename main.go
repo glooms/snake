@@ -25,6 +25,6 @@ func exit(e error) {
   os.Exit(1)
 }
 
-func p(v ...interface{}) {
+func print(v ...interface{}) {
   logger.Print(v...)
 }
