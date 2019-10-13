@@ -114,7 +114,6 @@ func newFood(w, h int, not []point) *point {
 			return &p
 		}
 	}
-	return nil
 }
 
 func (d dir) String() string {
