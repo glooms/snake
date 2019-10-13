@@ -1,4 +1,4 @@
-module snake
+module github.com/glooms/snake
 
 go 1.13
 
