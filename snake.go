@@ -1,4 +1,4 @@
-package main
+package snake
 
 import (
   "fmt"
@@ -17,6 +17,8 @@ type Snake struct{
   pauseChan chan bool
   clockChan chan bool
 
+  init bool
+
   started bool
   paused bool
   over bool
@@ -33,7 +35,6 @@ type Snake struct{
   snakeStyle tcell.Style
   foodStyle tcell.Style
   hurtStyle tcell.Style
-  textStyle tcell.Style
 }
 
 const (
@@ -42,13 +43,15 @@ const (
 
 func NewSnake() *Snake {
   snk := &Snake{}
+
   //Setup styles
-  csnk := tcell.ColorForestGreen
-  cfod := tcell.ColorDarkViolet
-  chrt := tcell.ColorDarkGreen
-  snk.snakeStyle = tcell.StyleDefault.Background(csnk)
-  snk.foodStyle = tcell.StyleDefault.Background(cfod)
-  snk.hurtStyle = tcell.StyleDefault.Background(chrt)
+  col1 := tcell.ColorForestGreen
+  col2 := tcell.ColorDarkViolet
+  col3 := tcell.ColorDarkGreen
+
+  snk.snakeStyle = tcell.StyleDefault.Background(col1)
+  snk.foodStyle = tcell.StyleDefault.Background(col2)
+  snk.hurtStyle = tcell.StyleDefault.Background(col3)
 
   //Setup box
   b := tview.NewBox().SetBorder(true)
@@ -57,13 +60,19 @@ func NewSnake() *Snake {
   snk.box = b
 
   //Setup app
-  snk.app = tview.NewApplication().SetRoot(b, true)
+  snk.app = tview.NewApplication().SetRoot(b, false)
+  snk.app.SetBeforeDrawFunc(func (sc tcell.Screen) bool {
+    if !snk.init {
+      w, h := sc.Size()
+      snk.box.SetRect(0, 0, w, h)
+      snk.init = true
+      tview.Print(sc, "Hello!", 0, 0, w, 0, -1)
+    }
+    return false
+  })
 
   //Setup threading and channels
-  dur, err := time.ParseDuration("10ms")
-  if err != nil {
-    exit(err)
-  }
+  dur, _ := time.ParseDuration("10ms")
   snk.tick = dur * 10
   snk.dstep = dur
   snk.pauseChan = make(chan bool, 10)
@@ -76,14 +85,14 @@ func NewSnake() *Snake {
 }
 
 func (snk *Snake) Run() {
-  if err := snk.app.Run(); err != nil {
+  err := snk.app.Run()
+  if err != nil {
     panic(err)
   }
 }
 
 func (snk *Snake) start() {
   if !snk.started {
-//    fmt.Println("start")
     snk.pauseChan<-true
     snk.started = true
   }
@@ -193,6 +202,30 @@ func (snk *Snake) eat() {
 func (snk *Snake) draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int) {
   if snk.food == nil {
     snk.food = newFood(w, h, snk.m.get())
+    return
+  }
+  if !snk.started || snk.paused {
+    var str string
+    if snk.paused {
+      str = "PRESS 'P' TO RESUME"
+    } else {
+      str = "PRESS ANY KEY TO START"
+    }
+    tview.Print(screen, str, 0, h / 4, w, 1, tcell.ColorWhite)
+    str = "CONTROLS:"
+    tview.Print(screen, str, w / 4, h / 4 + 2, w / 2, 0, tcell.ColorWhite)
+    ctrls := []string{
+      "PAUSE:          'P'",
+      "",
+      "\u2191   'UP'    'W' 'K'",
+      "\u2193   'DOWN'  'S' 'J'",
+      "\u2190   'LEFT'  'A' 'H'",
+      "\u2192   'RIGHT' 'D' 'L'",
+    }
+    for i, c := range ctrls {
+      tview.Print(screen, c, w / 4, h / 4 + 2 + i, w / 2, 2, tcell.ColorWhite)
+    }
+
   }
   fill := func(px, py int, st tcell.Style) {
     r, cmb, _, _ := screen.GetContent(px, py)
@@ -202,9 +235,7 @@ func (snk *Snake) draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int)
   }
   m := point{w / 4, h / 2}
   str := fmt.Sprintf("SCORE: %d\t SPEED: %d", snk.score, snk.speed)
-  for i, r := range str {
-    screen.SetContent(3 * w / 4 + i, 1, r, []rune{}, snk.textStyle)
-  }
+  tview.Print(screen, str, 3 * w / 4, 1, w / 4, 0, tcell.ColorWhite)
   head := snk.m.head()
   if head.x + m.x == m.x * 2 || head.x + m.x == 0 || head.y + m.y == m.y * 2 || head.y + m.y == 0 {
     if snk.started {
@@ -214,7 +245,6 @@ func (snk *Snake) draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int)
   snk.newGrid(w, h)
   for _, p := range snk.m.get() {
     x, y := p.x + m.x, p.y + m.y
-    print("snk: ", x, " ", y)
     if snk.grid[x][y] == 1 {
       snk.gameOver()
     } else {
@@ -224,7 +254,6 @@ func (snk *Snake) draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int)
 
   if snk.food != nil {
     x, y := snk.food.x + m.x, snk.food.y + m.y
-    print("food: ", x, " ", y)
     if snk.grid[x][y] == 1 {
       snk.eat()
     } else {
@@ -251,45 +280,42 @@ func (snk *Snake) draw(screen tcell.Screen, x, y, w, h int) (xn, yn, wn, hn int)
   }
   screen.HideCursor()
   if snk.over {
-    str := fmt.Sprintf("GAME OVER")
-    for i, r := range str {
-      screen.SetContent(w/2 - len(str) / 2 + i, h/2 - 1, r, []rune{}, snk.textStyle)
+    str := "GAME OVER"
+    tview.Print(screen, str, 0, h / 2 - 1, w, 1, tcell.ColorWhite)
+    str = "Press any key to try again"
+    l := len(str)
+    tview.Print(screen, str, 0, h / 2 + 1, w, 1, tcell.ColorWhite)
+    str = "SCORE:"
+    tview.Print(screen, str, w / 2 - l / 2, h / 2 + 4, w, 0, tcell.ColorWhite)
+    str = fmt.Sprintf("%d", snk.score)
+    tview.Print(screen, str, w / 2 - l / 2, h / 2 + 4, l / 2, 2, tcell.ColorRed)
+    switch lvl := snk.score / 5; lvl {
+    case 0:
+      str = "Next time will go better!"
+    case 1:
+      str = "You can do better!"
+    case 2:
+      str = "It's a learning process."
+    case 3:
+      str = "You're getting there!"
+    case 4:
+      str = "Shoot for the stars!"
+    case 5:
+      str = "Well done!"
+    case 6:
+      str = "Good, really good!"
+    case 7:
+      str = "Ssssnake whisperer"
+    case 8:
+      str = "Were you born a reptile?"
+    case 9:
+      str = "WOW! Crazy good!"
+    case 10:
+      str = "Holy Snakes"
+    case 11:
+      str = "sNaK3_g0dz'"
     }
-    str = fmt.Sprintf("Press any key to try again")
-    for i, r := range str {
-      screen.SetContent(w/2 - len(str) / 2 + i, h/2 + 1, r, []rune{}, snk.textStyle)
-    }
-    str = fmt.Sprintf("SCORE: %d", snk.score)
-    for i, r := range str {
-      screen.SetContent(w/2 - len(str) / 2 + i, h/2 + 3, r, []rune{}, snk.textStyle)
-    }
-    var adj string
-    switch {
-    case snk.score < 5:
-      adj = "poor"
-    case snk.score < 10:
-      adj = "mediochre"
-    case snk.score < 20:
-      adj = "decent"
-    case snk.score < 30:
-      adj = "good"
-    case snk.score < 40:
-      adj = "respectable"
-    case snk.score < 50:
-      adj = "crazy"
-    case snk.score < 100:
-      adj = "INSANE"
-    case snk.score > 100:
-      adj = "GODLIKE"
-    }
-    if snk.score > 100 {
-      str = "You are: sNaKE_g0d"
-    } else {
-      str = fmt.Sprintf("It's %s.", adj)
-    }
-    for i, r := range str {
-      screen.SetContent(w/2 - len(str) / 2 + i, h/2 + 4, r, []rune{}, snk.textStyle)
-    }
+    tview.Print(screen, str, w / 2 - l / 2, h / 2 + 6, w, 0, tcell.ColorWhite)
   }
   return
 }

@@ -1,4 +1,4 @@
-module gfx
+module snake
 
 go 1.13
 
